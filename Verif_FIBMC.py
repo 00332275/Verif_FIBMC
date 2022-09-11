@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 # Entrada de dados
 #
 
-with open('dados.xlsx', 'rb') as target:
+with open('dados_FIB.xlsx', 'rb') as target:
     sheet =  pd.read_excel(target, sheet_name='Planilha1')
     data  =  sheet.values
 #
@@ -49,11 +49,12 @@ Maxd = np.single(data[0,14])      # coluna O: Maxd
 # Final da entrada de dados
 #
 ################################################
-# cálculo das const. para diag. stress-strain
+# cálculo das const. para diag. de tensão de compressão
 #
-cc  = 200000/Es
-fck = fck*cc
-fcm = fck + 8
+cc   = 200000/Es
+fck  = fck*cc
+#fcm = (fck/1.4*0.85)/cc
+fcm  = (fck + 8)/cc
 
     # determinação do k
 k_i = pd.read_csv('kvalues.csv')
@@ -64,9 +65,9 @@ k   = np.round(k4(fck),2)
 
     # determinação de epsc limite
 if fck<50:
-    epsc_lim = 3.5/1000
+    epsc_lim = -3.5/1000
 else:
-    epsc_lim = np.round(-0.01*fck + 3.9,1)/1000
+    epsc_lim = np.round(0.01*fck - 3.9,1)/1000
 
     # determinação de epsc1
 epsc1_i = pd.read_csv('epsc1values.csv')
@@ -81,26 +82,42 @@ for i in range(1001):
     if i==1000:
         continue
     else:
-        epsc[i+1] = epsc[i] + epsc_lim/1000
+        epsc[i+1] = (epsc[i] + epsc_lim/1000)
 eta = epsc/epsc1
-sigmac_i = fcm*(k*eta - eta**2)/(1+(k-2)*eta)
+sigmac_i = -(k*eta - eta**2)/(1+(k-2)*eta)   #sigmac_i/fcm
 ajust4 = np.poly1d(np.polyfit(epsc, sigmac_i, 4))
-a0 = ajust4[0]/fcm
-a1 = ajust4[1]/fcm
-a2 = ajust4[2]/fcm
-a3 = ajust4[3]/fcm
-a4 = ajust4[4]/fcm
+a0 = ajust4[0]
+a1 = ajust4[1]
+a2 = ajust4[2]
+a3 = ajust4[3]
+a4 = ajust4[4]
 
 # plot gráficos
 sigmac4 = ajust4(epsc)
 fig, ax = plt.subplots()
-line_down, = ax.plot(epsc, sigmac_i, 'b', label='Eq. FIB model code')
-line_up, = ax.plot(epsc, sigmac4, 'r--', label='Polinômio 4a ordem')
+line_down, = ax.plot(-epsc, -sigmac_i, 'b', label='Eq. FIB model code')
+line_up, = ax.plot(-epsc, -sigmac4, 'r--', label='Polinômio 4a ordem')
 ax.legend(handles=[line_up, line_down])
 ax.set_xlabel('concrete strain εc<0')
 ax.set_ylabel('concrete stress σc<0[MPa]');
 
-#
+################################################
+# cálculo das const. para diag. de tensão de tração
+if fck>50:
+    fctm = (2.12*np.log(1 + 0.1*(fck + 8)))/cc
+else:
+    fctm = (0.3*(fck)**(2/3))/cc
+
+alfE = 1.0 # granito e gnaisse (1.2=basalto, 0.9=calcário, 0.7=arenito)
+Eci  = (21.5 * 10**3 * alfE * ((fck + 8)/10)**(1/3))/cc
+b1   = Eci
+
+epsct0 = 0.9*fctm/Eci
+c1   = 0.1*fctm / (0.15/1000 - epsct0)
+c0   = fctm * (0.9 - (0.1*epsct0)/(0.15/1000 - epsct0))
+
+
+################################################
 xmax = np.amax(xc, axis=0)
 xmin = np.amin(xc, axis=0)
 ymax = np.amax(yc, axis=0)
@@ -166,37 +183,77 @@ Variáveis:
     rj() - porcentagem de armaduras das barras
     Es - módulo de def. longitudinal do aço
 """
-def esfor(As, a1, a2, a3, a4, Es, epscu, epsc2, fcm, fyk, gamas,
+def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk, gamas,
           Ly, rj, X, xc, xg, yc, yg, ys):
     YS = np.max(yc)
-    YI = np.min(ys)
+    rjj= np.copy(rj)
+    for i in range(np.size(rjj)):
+        if ys[i] > 0:
+            rjj[i] = 0
+        else:
+            continue
+    rjj2 = rjj/(np.sum(rjj))
+    YI = np.sum(rjj2*ys)
     d  = YS-YI
     # calculo de epsilon S e epsilon I
-    if X>(-1E50) and X<=((epscu*d)/(10/1000+epscu)):
-        epsS = -10/1000*X/(d-X)
-        epsI = 10/1000
-    elif X>=((epscu*d)/(10/1000+epscu)) and X<=(d):
+    # domínios 1 e 2
+    if X>(-1E50) and X<=((epscu*d)/(50/(1.08*1000)+epscu)):
+        epsS = -50/(1.08*1000)*X/(d-X)
+        epsI = 50/(1.08*1000)
+    # domínios 3 e 4
+    elif X>=((epscu*d)/(50/(1.08*1000)+epscu)) and X<=(d):
         epsS = -epscu
         epsI = epscu*(d-X)/X
+    # domínio 4a
     elif X>=(d) and X<=(Ly):
         epsS = -epscu
         epsI = 0
+    # domínio 5
     else:
         epsS = -epsc2*(X/(X-Ly*((epscu-epsc2)/epscu)))
         epsI = -epsc2*((X-Ly)/(X-Ly*((epscu-epsc2)/epscu)))
 
-    b = (epsS-epsI)/(YS-YI)
+    b = (epsS-epsI)/d
     c = epsS - b*YS
 
     xx1, yy1 = poli(xc, yc, c, b)
     Mrx1, Nr1 = reg1(a1, a2, a3, a4, c, b, fcm, xx1, yy1)
-    #Mrx2, Nr2 = reg2(fcd, xx2, yy2)
+    #
+    if epsI>=0:
+        xxt1, yyt1, xxt2, yyt2 = polit(xc, yc, c, b, epsct0, b1)
+    else:
+        xxt1 = np.zeros(np.size(xc))
+        yyt1 = xxt2 = yyt2 = xxt1
+    Mrxt1, Nrt1 = regt(b, c, b1, 0, xxt1, yyt1)
+    Mrxt2, Nrt2 = regt(b, c, c1, c0, xxt2, yyt2)
+    
+    # Param. abertura de fissuras
+    kk   = np.argmin(ys)
+    As1  = rj[kk]*As
+    phi1 = np.sqrt(As1*4/np.pi)
+    cob  = np.abs(np.min(yc) - np.min(ys)) - phi1/2
+    Ast  = As*(np.sum(rjj))
+    if 2.5*(Ly-d)<(Ly-X)/3:
+        Ac_ef = 2.5*(Ly-d)
+    else:
+        Ac_ef = (Ly-X)/3
+    rhos_ef = Ast/Ac_ef
+    lsmax = 1.0*cob + 0.25*phi1/(1.8*rhos_ef)
+    Gf  = (73 * (fcm*200000/Es)**0.18)/1e5 #kN/cm
+    w1  = Gf/(fctm)
+    k1  = 0.8*fctm/(0.15/1000 - w1/lsmax)
+    k0  = fctm - 0.15/1000*k1
+    kk1 = - 0.2*fctm/(4*w1/lsmax)
+    kk0 = - 5*kk1*w1/lsmax
+    #
+    Mrxt3, Nrt3 = regt(b, c, k1, k0, xxt3, yyt3)
+    Mrxt4, Nrt4 = regt(b, c, kk1, kk0, xxt4, yyt4)
     
     fyd = fyk/gamas
     Mrxas, Nras = aco(As, b, c, Es, fyd, rj, ys)
     
-    Mrxd = Mrx1 + Mrxas
-    Nrd = Nr1 + Nras
+    Mrxd = Mrx1 + (Mrxt1 + Mrxt2) + Mrxas
+    Nrd = Nr1 + (Nrt1 + Nrt2) + Nras
     
     return (Mrxd, Nrd, epsS, epsI)
 #############################
@@ -243,13 +300,100 @@ def poli(xc, yc, c, b):
 
 #############################
 """
-Função reg1() integra a região 1 de compressão do concreto, retornando momento
+Função polit() retorna as variáveis xxt1,yyt1,xxt2,yyt2 que determinam
+as poligonais das regiões 1 e 2 da área tracionada da seção.
+Variáveis:
+    xc, yc - vértices da seção em relação ao cg.
+    xxt1, yyt1, xxt2, yyt2 - vértices das poligonais das reg. 1 e 2
+    c, b - variáveis de ajuste usadas em D0, D1 e D2
+    epsct0 - def. específica limite do 1o trecho
+    y01 - ordenada limite entre as regiões 0 e 1
+    y12 - ordenada limite entre as regiões 1 e 2
+    y22 - ordenada limite da região 2 (epsctlim = 0.15/1000)
+
+Last-Modified: 28/08/2022
+Status: 
+"""
+def polit(xc, yc, c, b, epsct0, b1):
+    y01 = -c/b
+    y12 = (epsct0 - c)/b
+    y22 = ((0.15/1000) - c)/b
+    xxt1 = np.copy(xc)
+    yyt1 = np.copy(yc)
+
+    for i in range(np.size(yyt1)):
+        if yyt1[i]>y01:
+            yyt1[i] = np.nan
+            xxt1[i] = np.nan
+        elif np.isnan(yyt1[i-1])==True:
+            yyt1[i-1] = y01
+            xxt1[i-1] = (y01-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+        elif i<(np.size(yyt1)-1):
+            if (yyt1[i+1]>y01) and (yyt1[i]<y01):
+                yyt1[i+1] = y01
+                xxt1[i+1] = (y01-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+        else:
+            continue
+    for i in range(np.size(yyt1)):
+        if yyt1[i]<y12:
+            yyt1[i] = np.nan
+            xxt1[i] = np.nan
+        elif np.isnan(yyt1[i-1])==True:
+            yyt1[i-1] = y12
+            xxt1[i-1] = (y12-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+        elif i<(np.size(yyt1)-1):
+            if (yyt1[i+1]<y12) and (yyt1[i]>y12):
+                yyt1[i+1] = y12
+                xxt1[i+1] = (y12-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+        else:
+            continue
+    yyt1=yyt1[np.logical_not(np.isnan(yyt1))]
+    xxt1=xxt1[np.logical_not(np.isnan(xxt1))]
+    
+    xxt2 = np.copy(xc)
+    yyt2 = np.copy(yc)
+    
+    for i in range(np.size(yyt2)):
+        if yyt2[i]>y12:
+            yyt2[i] = np.nan
+            xxt2[i] = np.nan
+        elif np.isnan(yyt2[i-1])==True:
+            yyt2[i-1] = y12
+            xxt2[i-1] = (y12-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+        elif i<(np.size(yyt2)-1):
+            if (yyt2[i+1]>y12) and (yyt2[i]<y12):
+                yyt2[i+1] = y12
+                xxt2[i+1] = (y12-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+        else:
+            continue
+    for i in range(np.size(yyt2)):
+        if yyt2[i]<y22:
+            yyt2[i] = np.nan
+            xxt2[i] = np.nan
+        elif np.isnan(yyt2[i-1])==True:
+            yyt2[i-1] = y22
+            xxt2[i-1] = (y22-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+        elif i<(np.size(yyt2)-1):
+            if (yyt2[i+1]<y22) and (yyt2[i]>y22):
+                yyt2[i+1] = y22
+                xxt2[i+1] = (y22-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+        else:
+            continue
+    yyt2=yyt2[np.logical_not(np.isnan(yyt2))]
+    xxt2=xxt2[np.logical_not(np.isnan(xxt2))]
+    
+    return (xxt1, yyt1, xxt2, yyt2)
+#############################
+
+#############################
+"""
+Função reg1() integra a região de compressão do concreto, retornando momento
 e esforço normal resistente.
 Variáveis:
-    D0, D1, D2 - coef. geométricos da seção p/ calc. das tensões no concreto
+    D0, D1,..., D4 - coef. geométricos da seção p/ calc. das tensões no concreto
     scd = sigma cd, tensão de cálculo do concreto
-    Mrx1, Nr1 - esforços resistentes da reg. 1
-    G00, G01, G02, G03 - polinômios de integração
+    Mrx1, Nr1 - esforços resistentes da reg. comprimida
+    G00, G01,..., G05 - polinômios de integração
 """
 def reg1(a1, a2, a3, a4, c, b, fcm, xx1, yy1):
     D0   = a1*c + a2*c**2 + a3*c**3 + a4*c**4
@@ -293,33 +437,35 @@ def reg1(a1, a2, a3, a4, c, b, fcm, xx1, yy1):
 #############################
 #############################
 """
-Função reg2() integra a região 2 de compressão do concreto, retornando momento
-e esforço normal resistente.
+Função regt() integra as regiões de tração/fissuração do concreto, definidas
+por funções lineares, retornando momento e esforço normal resistente.
 Variáveis:
-    scd = sigma cd, tensão de cálculo do concreto
-    Mrx2, Nr2 - esforços resistentes da reg. 2
-    G00, G01, G02, G03 - polinômios de integração
+    Mrxt, Nrt - esforços resistentes da regiao
+    G00, G01, G02 - polinômios de integração
 """
-def reg2(fcd, xx2, yy2):
-    scd  = 0.85*fcd
-    Mrx2 = 0
-    Nr2  = 0
-    for i in range(np.size(xx2)-1):
-        x1 = xx2[i]
-        y1 = yy2[i]
-        x2 = xx2[i+1]
-        y2 = yy2[i+1]
+def regt(b, c, k1, k0, xt, yt):
+    D0    = k1*c + k0
+    D1    = k1*b
+    Mrxt = 0
+    Nrt  = 0
+    for i in range(np.size(xt)-1):
+        x1 = xt[i]
+        y1 = yt[i]
+        x2 = xt[i+1]
+        y2 = yt[i+1]
         dx = x2 - x1
         dy = y2 - y1
         dy1  = dy/2 
         if dy==0:
             continue
         else:
+            dy2  = dy*dy
             G00  = (x1 + dx/2)*dy
             G01  = (x1*(y1+dy1)+dx*(y1/2+dy/3))*dy
-            Mrx2 = Mrx2 - scd*G01
-            Nr2  = Nr2 - scd*G00
-    return (Mrx2, Nr2)
+            G02  = (x1*(y1*(dy+y1)+dy2/3) + dx*(y1*(y1/2+dy/1.5)+dy2/4))*dy
+            Mrxt = Mrxt + D0*G01 + D1*G02
+            Nrt  = Nrt + D0*G00 + D1*G01
+    return (Mrxt, Nrt)
 #############################
 #############################
 """
@@ -364,28 +510,32 @@ def nlsistema(var, *var_aux):
     a2    = const[2]
     a3    = const[3]
     a4    = const[4]
-    Es    = const[5]
-    fcm   = const[6]
-    fyk   = const[7]
-    gamas = const[8]
-    Ly    = const[9]
-    Maxd  = const[10]
-    Nad   = const[11]
-    Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, a3, a4, Es, epscu, epsc2, fcm, fyk,
+    b1    = const[5]
+    c0    = const[6]
+    c1    = const[7]
+    Es    = const[8]
+    fcm   = const[9]
+    fyk   = const[10]
+    gamas = const[11]
+    Ly    = const[12]
+    Maxd  = const[13]
+    Nad   = const[14]
+    epsct0= const[15]
+    Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk,
                                   gamas, Ly, rj, X, xc, xg, yc, yg, ys)
     f = lamb*(Mrxd) - Maxd
     g = lamb*(Nrd) - Nad
     return[f,g]
 
-const = np.array([As, a1, a2, a3, a4, Es, fcm, fyk, gamas, Ly, Maxd, Nad])
+const = np.array([As, a1, a2, a3, a4, b1, c0, c1, Es, fcm, fyk, gamas, Ly, Maxd, Nad, epsct0])
 lamb_i = 1 #lambda inicial
 X_i = 0.5*Ly #altura da LN inicial
 s0 = np.array([X_i, lamb_i])
-var_aux = (const, epsc_lim, epsc1, rj, xc, xg, yc, yg, ys)
+var_aux = (const, -epsc_lim, -epsc1, rj, xc, xg, yc, yg, ys)
 X, lamb  = fsolve(nlsistema, s0, var_aux)
-#Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, Es, epscu, epsc2, fcd, fyk,
-#                              gamas, Ly, rj, X, xc, xg, yc, yg, ys)
-#FS = 1/lamb
+Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, -epsc_lim, -epsc1, epsct0, fcm, fyk,
+                              gamas, Ly, rj, X, xc, xg, yc, yg, ys)
+FS = 1/lamb
 
 """
 # Exportar resultados para Excel
@@ -426,6 +576,5 @@ worksheet.write(row+1, col, dt_string, cell_format3)
 worksheet.write(row+1, col+1, '', cell_format3)
 out.close()
 #
-
-print('X=', X, '\nFS=', FS, '\nMrxd=', Mrxd, '\nNrd=', Nrd)
 """
+print('X=', X, '\nFS=', FS, '\nMrxd=', Mrxd, '\nNrd=', Nrd)
