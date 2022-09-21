@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 # Entrada de dados
 #
 
-with open('dados_FIB.xlsx', 'rb') as target:
+with open('arezoumandi-rca-4.xlsx', 'rb') as target:
     sheet =  pd.read_excel(target, sheet_name='Planilha1')
     data  =  sheet.values
 #
@@ -41,8 +41,6 @@ rj = data[0:ns,7]                 # coluna H: rj
 fck = np.single(data[0,8])        # coluna I: fck
 fyk = np.single(data[0,9])        # coluna J: fyk
 Es = np.single(data[0,10])        # coluna K: Es
-gamac = np.single(data[0,11])     # coluna L: gamac
-gamas = np.single(data[0,12])     # coluna M: gamas
 Nad = np.single(data[0,13])       # coluna N: Nad
 Maxd = np.single(data[0,14])      # coluna O: Maxd
 #
@@ -51,7 +49,7 @@ Maxd = np.single(data[0,14])      # coluna O: Maxd
 ################################################
 # cálculo das const. para diag. de tensão de compressão
 #
-cc   = 200000/Es
+cc   = 1e5/(10**np.floor(np.log10(Es)))
 fck  = fck*cc
 #fcm = (fck/1.4*0.85)/cc
 fcm  = (fck + 8)/cc
@@ -92,6 +90,7 @@ a2 = ajust4[2]
 a3 = ajust4[3]
 a4 = ajust4[4]
 
+"""
 # plot gráficos
 sigmac4 = ajust4(epsc)
 fig, ax = plt.subplots()
@@ -100,6 +99,7 @@ line_up, = ax.plot(-epsc, -sigmac4, 'r--', label='Polinômio 4a ordem')
 ax.legend(handles=[line_up, line_down])
 ax.set_xlabel('concrete strain εc<0')
 ax.set_ylabel('concrete stress σc<0[MPa]');
+"""
 
 ################################################
 # cálculo das const. para diag. de tensão de tração
@@ -179,11 +179,10 @@ Variáveis:
     a1, a2 - coeficientes do ajuste por regressão do diagr. parábola/ret
     fcd - resistência à compressão do concreto em projeto
     fyk - resistência à tração característica do aço
-    gamas - coeficiente de segurança aço
     rj() - porcentagem de armaduras das barras
     Es - módulo de def. longitudinal do aço
 """
-def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk, gamas,
+def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk,
           Ly, rj, X, xc, xg, yc, yg, ys):
     YS = np.max(yc)
     rjj= np.copy(rj)
@@ -197,11 +196,11 @@ def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk, ga
     d  = YS-YI
     # calculo de epsilon S e epsilon I
     # domínios 1 e 2
-    if X>(-1E50) and X<=((epscu*d)/(50/(1.08*1000)+epscu)):
-        epsS = -50/(1.08*1000)*X/(d-X)
-        epsI = 50/(1.08*1000)
+    if X>(-1E50) and X<=((epscu*d)/(50/(1000)+epscu)):
+        epsS = -50/(1000)*X/(d-X)
+        epsI = 50/(1000)
     # domínios 3 e 4
-    elif X>=((epscu*d)/(50/(1.08*1000)+epscu)) and X<=(d):
+    elif X>=((epscu*d)/(50/(1000)+epscu)) and X<=(d):
         epsS = -epscu
         epsI = epscu*(d-X)/X
     # domínio 4a
@@ -218,14 +217,6 @@ def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk, ga
 
     xx1, yy1 = poli(xc, yc, c, b)
     Mrx1, Nr1 = reg1(a1, a2, a3, a4, c, b, fcm, xx1, yy1)
-    #
-    if epsI>=0:
-        xxt1, yyt1, xxt2, yyt2 = polit(xc, yc, c, b, epsct0, b1)
-    else:
-        xxt1 = np.zeros(np.size(xc))
-        yyt1 = xxt2 = yyt2 = xxt1
-    Mrxt1, Nrt1 = regt(b, c, b1, 0, xxt1, yyt1)
-    Mrxt2, Nrt2 = regt(b, c, c1, c0, xxt2, yyt2)
     
     # Param. abertura de fissuras
     kk   = np.argmin(ys)
@@ -246,15 +237,30 @@ def esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk, ga
     kk1 = - 0.2*fctm/(4*w1/lsmax)
     kk0 = - 5*kk1*w1/lsmax
     #
+    if epsI>=0:
+        y01 = -c/b
+        y12 = (epsct0 - c)/b
+        y23 = ((0.15/1000) - c)/b
+        y34 = ((w1/lsmax) - c)/b
+        y44 = ((5*w1/lsmax) - c)/b
+        xxt1, yyt1 = polit(xc, yc, y01, y12)
+        xxt2, yyt2 = polit(xc, yc, y12, y23)
+        xxt3, yyt3 = polit(xc, yc, y23, y34)
+        xxt4, yyt4 = polit(xc, yc, y34, y44)
+    else:
+        xxt1 = np.zeros(np.size(xc))
+        yyt1 = xxt2 = yyt2 = xxt3 = yyt3 = xxt4 = yyt4 = xxt1
+        
+    Mrxt1, Nrt1 = regt(b, c, b1, 0, xxt1, yyt1)
+    Mrxt2, Nrt2 = regt(b, c, c1, c0, xxt2, yyt2)
     Mrxt3, Nrt3 = regt(b, c, k1, k0, xxt3, yyt3)
     Mrxt4, Nrt4 = regt(b, c, kk1, kk0, xxt4, yyt4)
     
-    fyd = fyk/gamas
-    Mrxas, Nras = aco(As, b, c, Es, fyd, rj, ys)
+    Mrxas, Nras = aco(As, b, c, Es, fyk, rj, ys)
     
-    Mrxd = Mrx1 + (Mrxt1 + Mrxt2) + Mrxas
-    Nrd = Nr1 + (Nrt1 + Nrt2) + Nras
-    
+    Mrxd = Mrx1 + (Mrxt1 + Mrxt2 + Mrxt3 + Mrxt4) + Mrxas
+    Nrd = Nr1 + (Nrt1 + Nrt2 + Nrt3 + Nrt4) + Nras
+        
     return (Mrxd, Nrd, epsS, epsI)
 #############################
 
@@ -300,11 +306,11 @@ def poli(xc, yc, c, b):
 
 #############################
 """
-Função polit() retorna as variáveis xxt1,yyt1,xxt2,yyt2 que determinam
-as poligonais das regiões 1 e 2 da área tracionada da seção.
+Função polit() retorna as variáveis xxt1,yyt1 que determinam
+as poligonais da região correspondente à área tracionada da seção.
 Variáveis:
     xc, yc - vértices da seção em relação ao cg.
-    xxt1, yyt1, xxt2, yyt2 - vértices das poligonais das reg. 1 e 2
+    xxt1, yyt1 - vértices das poligonais das região
     c, b - variáveis de ajuste usadas em D0, D1 e D2
     epsct0 - def. específica limite do 1o trecho
     y01 - ordenada limite entre as regiões 0 e 1
@@ -314,75 +320,43 @@ Variáveis:
 Last-Modified: 28/08/2022
 Status: 
 """
-def polit(xc, yc, c, b, epsct0, b1):
-    y01 = -c/b
-    y12 = (epsct0 - c)/b
-    y22 = ((0.15/1000) - c)/b
+def polit(xc, yc, y01, y12):
     xxt1 = np.copy(xc)
     yyt1 = np.copy(yc)
 
-    for i in range(np.size(yyt1)):
-        if yyt1[i]>y01:
-            yyt1[i] = np.nan
-            xxt1[i] = np.nan
-        elif np.isnan(yyt1[i-1])==True:
-            yyt1[i-1] = y01
-            xxt1[i-1] = (y01-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
-        elif i<(np.size(yyt1)-1):
-            if (yyt1[i+1]>y01) and (yyt1[i]<y01):
-                yyt1[i+1] = y01
-                xxt1[i+1] = (y01-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
-        else:
-            continue
-    for i in range(np.size(yyt1)):
-        if yyt1[i]<y12:
-            yyt1[i] = np.nan
-            xxt1[i] = np.nan
-        elif np.isnan(yyt1[i-1])==True:
-            yyt1[i-1] = y12
-            xxt1[i-1] = (y12-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
-        elif i<(np.size(yyt1)-1):
-            if (yyt1[i+1]<y12) and (yyt1[i]>y12):
-                yyt1[i+1] = y12
-                xxt1[i+1] = (y12-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
-        else:
-            continue
+    if y01<np.min(yc):
+        yyt1 = xxt1 = np.array([])
+    else:
+        for i in range(np.size(yyt1)):
+            if yyt1[i]>y01:
+                yyt1[i] = np.nan
+                xxt1[i] = np.nan
+            elif np.isnan(yyt1[i-1])==True:
+                yyt1[i-1] = y01
+                xxt1[i-1] = (y01-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+            elif i<(np.size(yyt1)-1):
+                if (yyt1[i+1]>y01) and (yyt1[i]<y01):
+                    yyt1[i+1] = y01
+                    xxt1[i+1] = (y01-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+            else:
+                continue
+        for i in range(np.size(yyt1)):
+            if yyt1[i]<y12:
+                yyt1[i] = np.nan
+                xxt1[i] = np.nan
+            elif np.isnan(yyt1[i-1])==True:
+                yyt1[i-1] = y12
+                xxt1[i-1] = (y12-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
+            elif i<(np.size(yyt1)-1):
+                if (yyt1[i+1]<y12) and (yyt1[i]>y12):
+                    yyt1[i+1] = y12
+                    xxt1[i+1] = (y12-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
+            else:
+                continue
     yyt1=yyt1[np.logical_not(np.isnan(yyt1))]
     xxt1=xxt1[np.logical_not(np.isnan(xxt1))]
     
-    xxt2 = np.copy(xc)
-    yyt2 = np.copy(yc)
-    
-    for i in range(np.size(yyt2)):
-        if yyt2[i]>y12:
-            yyt2[i] = np.nan
-            xxt2[i] = np.nan
-        elif np.isnan(yyt2[i-1])==True:
-            yyt2[i-1] = y12
-            xxt2[i-1] = (y12-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
-        elif i<(np.size(yyt2)-1):
-            if (yyt2[i+1]>y12) and (yyt2[i]<y12):
-                yyt2[i+1] = y12
-                xxt2[i+1] = (y12-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
-        else:
-            continue
-    for i in range(np.size(yyt2)):
-        if yyt2[i]<y22:
-            yyt2[i] = np.nan
-            xxt2[i] = np.nan
-        elif np.isnan(yyt2[i-1])==True:
-            yyt2[i-1] = y22
-            xxt2[i-1] = (y22-yc[i-1])/(yc[i]-yc[i-1])*(xc[i]-xc[i-1])+xc[i-1]
-        elif i<(np.size(yyt2)-1):
-            if (yyt2[i+1]<y22) and (yyt2[i]>y22):
-                yyt2[i+1] = y22
-                xxt2[i+1] = (y22-yc[i])/(yc[i+1]-yc[i])*(xc[i+1]-xc[i])+xc[i]
-        else:
-            continue
-    yyt2=yyt2[np.logical_not(np.isnan(yyt2))]
-    xxt2=xxt2[np.logical_not(np.isnan(xxt2))]
-    
-    return (xxt1, yyt1, xxt2, yyt2)
+    return (xxt1, yyt1)
 #############################
 
 #############################
@@ -482,16 +456,19 @@ Variáveis:
     rj - porcentagem de área de aço das armaduras
     ys - ordenadas das armaduras em relação ao cg
 """
-def aco(As, b, c, Es, fyd, rj, ys):
+def aco(As, b, c, Es, fyk, rj, ys):
     Nras  = 0
     Mrxas = 0
+    epsuk = 5/100
+    epsyk = fyk/Es
+    a1 = (0.08*fyk)/(epsuk - epsyk)
+    a0 = fyk - a1*epsyk
     for i in range(np.size(ys)):
         epsb = b*ys[i] + c
-        epsyd = fyd/Es
-        if (np.abs(epsb)<=epsyd):
+        if (np.abs(epsb)<=epsyk):
             sig = Es*epsb
         else:
-            sig = np.sign(epsb)*fyd
+            sig = a1*epsb + a0
         Nrasi = rj[i]*As*sig
         Nras  = Nras + Nrasi
         Mrxas = Mrxas + Nrasi*ys[i]
@@ -516,28 +493,28 @@ def nlsistema(var, *var_aux):
     Es    = const[8]
     fcm   = const[9]
     fyk   = const[10]
-    gamas = const[11]
-    Ly    = const[12]
-    Maxd  = const[13]
-    Nad   = const[14]
-    epsct0= const[15]
+    Ly    = const[11]
+    Maxd  = const[12]
+    Nad   = const[13]
+    epsct0= const[14]
+    #print(X,lamb)
     Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, epscu, epsc2, epsct0, fcm, fyk,
-                                  gamas, Ly, rj, X, xc, xg, yc, yg, ys)
+                                  Ly, rj, X, xc, xg, yc, yg, ys)
     f = lamb*(Mrxd) - Maxd
     g = lamb*(Nrd) - Nad
     return[f,g]
 
-const = np.array([As, a1, a2, a3, a4, b1, c0, c1, Es, fcm, fyk, gamas, Ly, Maxd, Nad, epsct0])
+const = np.array([As, a1, a2, a3, a4, b1, c0, c1, Es, fcm, fyk, Ly, Maxd, Nad, epsct0])
 lamb_i = 1 #lambda inicial
 X_i = 0.5*Ly #altura da LN inicial
 s0 = np.array([X_i, lamb_i])
 var_aux = (const, -epsc_lim, -epsc1, rj, xc, xg, yc, yg, ys)
 X, lamb  = fsolve(nlsistema, s0, var_aux)
 Mrxd, Nrd, epsS, epsI = esfor(As, a1, a2, a3, a4, b1, c0, c1, Es, -epsc_lim, -epsc1, epsct0, fcm, fyk,
-                              gamas, Ly, rj, X, xc, xg, yc, yg, ys)
+                              Ly, rj, X, xc, xg, yc, yg, ys)
 FS = 1/lamb
 
-"""
+
 # Exportar resultados para Excel
 out = xlsxwriter.Workbook('saída.xlsx')
 worksheet = out.add_worksheet()
@@ -576,5 +553,5 @@ worksheet.write(row+1, col, dt_string, cell_format3)
 worksheet.write(row+1, col+1, '', cell_format3)
 out.close()
 #
-"""
+
 print('X=', X, '\nFS=', FS, '\nMrxd=', Mrxd, '\nNrd=', Nrd)
